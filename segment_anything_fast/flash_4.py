@@ -181,6 +181,12 @@ def _attention_rel_h_rel_w_kernel_aligned_device(q, k, v, rel_h_w, sm_scale, o,
                                                  BLOCK_N,
                                                  num_warps,
                                                  num_stages):
+    # q, k, v are expected to have shape [B, H, L, D] and rel_h_w encodes the
+    # decomposed relative positional bias with last dimension (k_h + k_w).
+    # For the original SAM setup (img=1024, patch=16) and D=64 this is 128.
+    # For smaller token grids (e.g. CPSAM tiles), k_h + k_w can be smaller
+    # (e.g. 32 + 32 = 64). The kernel only requires that this last dim is even
+    # so it can be split into two equal halves.
     _, Lk, _ = q.shape[-1], k.shape[-1], v.shape[-1]
     assert q.size() == k.size()
     assert q.size() == v.size()
@@ -190,8 +196,8 @@ def _attention_rel_h_rel_w_kernel_aligned_device(q, k, v, rel_h_w, sm_scale, o,
     assert v.dtype == k.dtype
     assert o.dtype == v.dtype
     assert rel_h_w.dtype == q.dtype
-    assert rel_h_w.size(-1) == 128
-    # assert rel_h_w.size(-1) == 2 * BLOCK_N
+    # rel_h_w last dimension must be even (rel_h + rel_w concatenated).
+    assert rel_h_w.size(-1) % 2 == 0
 
     grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
     # print("q.shape[0] * q.shape[1]: ", q.shape[0] * q.shape[1])
